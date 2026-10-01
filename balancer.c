@@ -101,16 +101,48 @@ void *handle_connection(void *arg) {
         return NULL;
     }
 
-    char buffer[BUFFER_SIZE];
-    int bytes_read = read(client_fd, buffer, BUFFER_SIZE - 1);
-    if (bytes_read > 0) {
-        write(backend_fd, buffer, bytes_read);
-        
-        // Loop reading from backend until EOF
-        while (1) {
-            int bytes_resp = read(backend_fd, buffer, BUFFER_SIZE - 1);
-            if (bytes_resp <= 0) break;
-            write(client_fd, buffer, bytes_resp);
+    int max_fd = (client_fd > backend_fd) ? client_fd : backend_fd;
+    fd_set fds;
+    int client_open = 1;
+    int backend_open = 1;
+
+    while (client_open || backend_open) {
+        FD_ZERO(&fds);
+        if (client_open) FD_SET(client_fd, &fds);
+        if (backend_open) FD_SET(backend_fd, &fds);
+
+        if (select(max_fd + 1, &fds, NULL, NULL, NULL) < 0) break;
+
+        if (client_open && FD_ISSET(client_fd, &fds)) {
+            char buffer[BUFFER_SIZE];
+            int r = read(client_fd, buffer, sizeof(buffer));
+            if (r <= 0) {
+                client_open = 0;
+                shutdown(backend_fd, SHUT_WR);
+            } else if (backend_open) {
+                int total = 0;
+                while (total < r) {
+                    int w = write(backend_fd, buffer + total, r - total);
+                    if (w <= 0) { client_open = 0; break; }
+                    total += w;
+                }
+            }
+        }
+
+        if (backend_open && FD_ISSET(backend_fd, &fds)) {
+            char buffer[BUFFER_SIZE];
+            int r = read(backend_fd, buffer, sizeof(buffer));
+            if (r <= 0) {
+                backend_open = 0;
+                shutdown(client_fd, SHUT_WR);
+            } else if (client_open) {
+                int total = 0;
+                while (total < r) {
+                    int w = write(client_fd, buffer + total, r - total);
+                    if (w <= 0) { backend_open = 0; break; }
+                    total += w;
+                }
+            }
         }
     }
 
