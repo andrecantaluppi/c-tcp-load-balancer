@@ -1,0 +1,5 @@
+# Compiled binary
+balancer
+
+# macOS specific
+.DS_Store
