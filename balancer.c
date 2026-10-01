@@ -101,16 +101,38 @@ void *handle_connection(void *arg) {
         return NULL;
     }
 
-    char buffer[BUFFER_SIZE];
-    int bytes_read = read(client_fd, buffer, BUFFER_SIZE - 1);
-    if (bytes_read > 0) {
-        write(backend_fd, buffer, bytes_read);
-        
-        // Loop reading from backend until EOF
-        while (1) {
-            int bytes_resp = read(backend_fd, buffer, BUFFER_SIZE - 1);
-            if (bytes_resp <= 0) break;
-            write(client_fd, buffer, bytes_resp);
+    int max_fd = (client_fd > backend_fd) ? client_fd : backend_fd;
+    fd_set fds;
+    int client_open = 1;
+    int backend_open = 1;
+
+    while (client_open || backend_open) {
+        FD_ZERO(&fds);
+        if (client_open) FD_SET(client_fd, &fds);
+        if (backend_open) FD_SET(backend_fd, &fds);
+
+        if (select(max_fd + 1, &fds, NULL, NULL, NULL) < 0) {
+            break;
+        }
+
+        if (client_open && FD_ISSET(client_fd, &fds)) {
+            char buffer[BUFFER_SIZE];
+            int bytes_read = read(client_fd, buffer, sizeof(buffer));
+            if (bytes_read <= 0) {
+                client_open = 0;
+            } else if (backend_open) {
+                write(backend_fd, buffer, bytes_read);
+            }
+        }
+
+        if (backend_open && FD_ISSET(backend_fd, &fds)) {
+            char buffer[BUFFER_SIZE];
+            int bytes_read = read(backend_fd, buffer, sizeof(buffer));
+            if (bytes_read <= 0) {
+                backend_open = 0;
+            } else if (client_open) {
+                write(client_fd, buffer, bytes_read);
+            }
         }
     }
 
